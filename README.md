@@ -1,10 +1,31 @@
-# 氣泡消除測試版 Stage 1 - iPhone Safari 修正版
+# Bubble Flow 1.6 舒壓美化版
 
-修正重點：
+這是以「漂亮、柔和、彈性回饋、動畫順暢」為主的 1.6 版。
 
-1. 不再依賴 `100dvh`，改用 JavaScript 讀取 `visualViewport.height` 後寫入 `--app-height`。
-2. `resize()` 不再在每次 iPhone Safari 網址列變動時重置整個遊戲，只重新校正位置。
-3. 泡泡繪製改成穩定的純色、陰影、反光，不使用可能在部分 Safari 狀態下出問題的複雜 radialGradient。
-4. 事件處理改成 PointerEvent 優先，沒有 PointerEvent 才使用 touch/mouse，避免 iPhone 觸控被重複觸發。
+## 主要更新
 
-請把這個 `index.html` 覆蓋 GitHub Pages repository 裡原本的 `index.html`。
+- 改成舒壓風格，不加入教育或知識內容
+- 背景改為柔和深色漸層、流動光暈、漂浮小泡泡
+- 泡泡改為玻璃質感與柔和發光
+- 發射時加入壓縮與回彈感
+- 撞牆加入泡泡變形回饋
+- 吸附時加入擴散波紋與鄰近泡泡震動
+- 三連消除改為 pop 粒子動畫
+- 浮空泡泡改為掉落動畫
+- 加入分數浮字與 combo 顯示
+- iPhone Safari 相容性延續前一版修正
+
+## 使用方式
+
+把 `index.html` 覆蓋 GitHub Pages repository 原本的 `index.html`。
+
+更新後建議用版本參數避開 Safari 快取：
+
+https://fishwutw.github.io/bubble-shooter/?v=16
+
+## 建議下一步
+
+- 加入柔和音效
+- 加入「重新開始」小按鈕
+- 調整泡泡速度、大小與消除爽感
+- 做成 PWA，可加入 iPhone / iPad 主畫面
