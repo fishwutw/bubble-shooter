@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="氣泡消除測試版" />
+  <title>氣泡消除測試版 Stage 1</title>
+  <style>
+    :root {
+      --bg1: #17202b;
+      --bg2: #273849;
+      --panel: rgba(255,255,255,.10);
+      --text: #f6fbff;
+      --muted: rgba(246,251,255,.72);
+    }
+    html, body {
+      margin: 0;
+      height: 100%;
+      overflow: hidden;
+      background: radial-gradient(circle at top, var(--bg2), var(--bg1));
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans TC", sans-serif;
+      color: var(--text);
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    #wrap {
+      width: 100vw;
+      height: 100dvh;
+      display: grid;
+      place-items: center;
+    }
+    #gameShell {
+      position: relative;
+      width: min(100vw, 760px);
+      height: 100dvh;
+      max-height: 1040px;
+      background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(0,0,0,.18));
+      box-shadow: 0 0 40px rgba(0,0,0,.35);
+      overflow: hidden;
+    }
+    canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      background:
+        radial-gradient(circle at 50% 18%, rgba(255,255,255,.10), transparent 32%),
+        linear-gradient(180deg, #1e2b39 0%, #243445 56%, #101820 100%);
+    }
+    #hud {
+      position: absolute;
+      top: max(10px, env(safe-area-inset-top));
+      left: 12px;
+      right: 12px;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      pointer-events: none;
+      font-weight: 700;
+      text-shadow: 0 2px 4px rgba(0,0,0,.4);
+    }
+    .pill {
+      background: var(--panel);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 15px;
+    }
+    #help {
+      position: absolute;
+      left: 12px;
+      right: 12px;
+      bottom: max(12px, env(safe-area-inset-bottom));
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+      pointer-events: none;
+      line-height: 1.45;
+      text-shadow: 0 2px 4px rgba(0,0,0,.5);
+    }
+    #overlay {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: rgba(0,0,0,.55);
+      padding: 24px;
+    }
+    .card {
+      width: min(92%, 430px);
+      background: rgba(20,32,44,.92);
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: 24px;
+      padding: 24px;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0,0,0,.45);
+    }
+    .card h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+    .card p {
+      margin: 8px 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    button {
+      margin-top: 16px;
+      border: 0;
+      border-radius: 999px;
+      padding: 13px 22px;
+      font-size: 17px;
+      font-weight: 800;
+      color: #10202f;
+      background: linear-gradient(180deg, #ffffff, #bfeeff);
+      box-shadow: 0 8px 20px rgba(0,0,0,.26);
+    }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="gameShell">
+      <canvas id="game"></canvas>
+      <div id="hud">
+        <div class="pill">分數：<span id="score">0</span></div>
+        <div class="pill">發射：<span id="shots">0</span></div>
+        <div class="pill">最高：<span id="best">0</span></div>
+      </div>
+      <div id="help">拖曳或點擊來瞄準，放開發射。三顆以上同色相連就會消除。</div>
+      <div id="overlay">
+        <div class="card">
+          <h1>氣泡消除測試版</h1>
+          <p>這是第一階段網頁原型：隨機排列、隨機發射、碰撞吸附、三連消除與計分。</p>
+          <p>iPad 請用 Safari 開啟，橫直向都可以測試。</p>
+          <button id="startBtn">開始測試</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+  const scoreEl = document.getElementById("score");
+  const shotsEl = document.getElementById("shots");
+  const bestEl = document.getElementById("best");
+  const overlay = document.getElementById("overlay");
+  const startBtn = document.getElementById("startBtn");
+
+  const colors = [
+    { name: "red",    fill: "#ff392e", glow: "rgba(255,57,46,.45)" },
+    { name: "yellow", fill: "#f2ee14", glow: "rgba(242,238,20,.45)" },
+    { name: "teal",   fill: "#10dbc7", glow: "rgba(16,219,199,.45)" },
+    { name: "purple", fill: "#7b55ff", glow: "rgba(123,85,255,.45)" },
+  ];
+
+  let W = 0, H = 0, dpr = 1;
+  let R = 23;
+  let rowH = 40;
+  let cols = 11;
+  let topOffset = 72;
+  let board = [];
+  let shooter = { x: 0, y: 0 };
+  let current = null;
+  let next = null;
+  let projectile = null;
+  let aim = { x: 0, y: -1 };
+  let pointerDown = false;
+  let score = 0;
+  let shots = 0;
+  let gameOver = false;
+  let started = false;
+  let best = Number(localStorage.getItem("bubbleBest") || "0");
+  bestEl.textContent = best;
+
+  function resize() {
+    const rect = canvas.getBoundingClientRect();
+    dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    W = Math.floor(rect.width);
+    H = Math.floor(rect.height);
+    canvas.width = Math.floor(W * dpr);
+    canvas.height = Math.floor(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    R = Math.max(18, Math.min(28, W / 18));
+    rowH = R * 1.72;
+    cols = Math.max(8, Math.floor((W - R * 2) / (R * 2)));
+    topOffset = Math.max(58, H * 0.075);
+    shooter.x = W / 2;
+    shooter.y = H - Math.max(88, H * 0.11);
+
+    if (started) resetGame();
+  }
+
+  function randColor() {
+    return colors[Math.floor(Math.random() * colors.length)];
+  }
+
+  function gridToPixel(row, col) {
+    const offset = (row % 2) * R;
+    const totalW = cols * R * 2 + R;
+    const left = (W - totalW) / 2 + R;
+    return {
+      x: left + col * R * 2 + offset + R,
+      y: topOffset + row * rowH
+    };
+  }
+
+  function pixelToGrid(x, y) {
+    let row = Math.round((y - topOffset) / rowH);
+    row = Math.max(0, Math.min(14, row));
+    const offset = (row % 2) * R;
+    const totalW = cols * R * 2 + R;
+    const left = (W - totalW) / 2 + R;
+    let col = Math.round((x - left - offset - R) / (R * 2));
+    col = Math.max(0, Math.min(cols - 1, col));
+    return { row, col };
+  }
+
+  function makeBubble(row, col, color = randColor()) {
+    const p = gridToPixel(row, col);
+    return { row, col, x: p.x, y: p.y, color };
+  }
+
+  function resetGame() {
+    board = [];
+    score = 0;
+    shots = 0;
+    gameOver = false;
+    current = randColor();
+    next = randColor();
+    projectile = null;
+    aim = { x: 0, y: -1 };
+    scoreEl.textContent = score;
+    shotsEl.textContent = shots;
+
+    const initialRows = 5;
+    for (let r = 0; r < initialRows; r++) {
+      board[r] = [];
+      for (let c = 0; c < cols; c++) {
+        // 留一點空洞，讓版面比較自然
+        if (r < 2 || Math.random() > 0.12) board[r][c] = makeBubble(r, c);
+        else board[r][c] = null;
+      }
+    }
+  }
+
+  function getBubble(row, col) {
+    return board[row] && board[row][col] ? board[row][col] : null;
+  }
+
+  function setBubble(b) {
+    if (!board[b.row]) board[b.row] = [];
+    const p = gridToPixel(b.row, b.col);
+    b.x = p.x; b.y = p.y;
+    board[b.row][b.col] = b;
+  }
+
+  function removeBubble(b) {
+    if (board[b.row]) board[b.row][b.col] = null;
+  }
+
+  function neighbors(row, col) {
+    const even = row % 2 === 0;
+    const dirs = even
+      ? [[0,-1],[0,1],[-1,-1],[-1,0],[1,-1],[1,0]]
+      : [[0,-1],[0,1],[-1,0],[-1,1],[1,0],[1,1]];
+    return dirs.map(([dr,dc]) => ({ row: row + dr, col: col + dc }))
+      .filter(n => n.row >= 0 && n.col >= 0 && n.col < cols);
+  }
+
+  function findCluster(start) {
+    const target = start.color.name;
+    const seen = new Set();
+    const stack = [start];
+    const cluster = [];
+    while (stack.length) {
+      const b = stack.pop();
+      const key = `${b.row},${b.col}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      cluster.push(b);
+      for (const n of neighbors(b.row, b.col)) {
+        const nb = getBubble(n.row, n.col);
+        if (nb && nb.color.name === target) stack.push(nb);
+      }
+    }
+    return cluster;
+  }
+
+  function findFloating() {
+    const connected = new Set();
+    const stack = [];
+    if (board[0]) {
+      for (let c = 0; c < cols; c++) {
+        if (board[0][c]) stack.push(board[0][c]);
+      }
+    }
+    while (stack.length) {
+      const b = stack.pop();
+      const key = `${b.row},${b.col}`;
+      if (connected.has(key)) continue;
+      connected.add(key);
+      for (const n of neighbors(b.row, b.col)) {
+        const nb = getBubble(n.row, n.col);
+        if (nb) stack.push(nb);
+      }
+    }
+    const floating = [];
+    for (const row of board) {
+      if (!row) continue;
+      for (const b of row) {
+        if (b && !connected.has(`${b.row},${b.col}`)) floating.push(b);
+      }
+    }
+    return floating;
+  }
+
+  function snapProjectile() {
+    let target = pixelToGrid(projectile.x, projectile.y);
+
+    // 如果格子被佔用，找附近最近空格
+    let candidates = [{...target}];
+    for (const n of neighbors(target.row, target.col)) candidates.push(n);
+    for (const n of neighbors(target.row - 1, target.col)) candidates.push(n);
+    for (const n of neighbors(target.row + 1, target.col)) candidates.push(n);
+
+    let bestCell = null;
+    let bestDist = Infinity;
+    for (const cell of candidates) {
+      if (cell.row < 0 || cell.col < 0 || cell.col >= cols) continue;
+      if (getBubble(cell.row, cell.col)) continue;
+      const p = gridToPixel(cell.row, cell.col);
+      const dist = Math.hypot(projectile.x - p.x, projectile.y - p.y);
+      if (dist < bestDist) {
+        bestDist = dist;
+        bestCell = cell;
+      }
+    }
+
+    if (!bestCell) bestCell = target;
+    const placed = makeBubble(bestCell.row, bestCell.col, projectile.color);
+    setBubble(placed);
+
+    const cluster = findCluster(placed);
+    if (cluster.length >= 3) {
+      for (const b of cluster) removeBubble(b);
+      const floating = findFloating();
+      for (const b of floating) removeBubble(b);
+      score += cluster.length * 10 + floating.length * 20;
+      scoreEl.textContent = score;
+      if (score > best) {
+        best = score;
+        localStorage.setItem("bubbleBest", String(best));
+        bestEl.textContent = best;
+      }
+    }
+
+    projectile = null;
+    current = next;
+    next = randColor();
+
+    if (shots > 0 && shots % 6 === 0) addPressureRow();
+    checkGameOver();
+  }
+
+  function addPressureRow() {
+    const maxRows = Math.max(1, Math.floor((shooter.y - topOffset - R * 2) / rowH));
+    for (let r = Math.min(board.length, maxRows); r >= 1; r--) {
+      board[r] = [];
+      for (let c = 0; c < cols; c++) {
+        const old = getBubble(r - 1, c);
+        if (old) {
+          const moved = { ...old, row: r, col: c };
+          const p = gridToPixel(r, c);
+          moved.x = p.x; moved.y = p.y;
+          board[r][c] = moved;
+        } else {
+          board[r][c] = null;
+        }
+      }
+    }
+    board[0] = [];
+    for (let c = 0; c < cols; c++) {
+      board[0][c] = Math.random() > 0.18 ? makeBubble(0, c) : null;
+    }
+  }
+
+  function checkGameOver() {
+    for (const row of board) {
+      if (!row) continue;
+      for (const b of row) {
+        if (b && b.y + R > shooter.y - R * 2.2) {
+          gameOver = true;
+          overlay.style.display = "grid";
+          overlay.querySelector("h1").textContent = "遊戲結束";
+          overlay.querySelector("p").textContent = `本次分數：${score}。按下按鈕重新開始。`;
+          startBtn.textContent = "重新開始";
+          return;
+        }
+      }
+    }
+  }
+
+  function shoot() {
+    if (projectile || gameOver || !started) return;
+    projectile = {
+      x: shooter.x,
+      y: shooter.y - R * 1.7,
+      vx: aim.x * Math.max(7, W / 80),
+      vy: aim.y * Math.max(7, W / 80),
+      color: current
+    };
+    shots++;
+    shotsEl.textContent = shots;
+  }
+
+  function update() {
+    if (projectile) {
+      projectile.x += projectile.vx;
+      projectile.y += projectile.vy;
+
+      if (projectile.x - R < 0) {
+        projectile.x = R;
+        projectile.vx *= -1;
+      }
+      if (projectile.x + R > W) {
+        projectile.x = W - R;
+        projectile.vx *= -1;
+      }
+      if (projectile.y - R <= topOffset - R * .6) {
+        projectile.y = topOffset;
+        snapProjectile();
+      } else {
+        for (const row of board) {
+          if (!row) continue;
+          for (const b of row) {
+            if (!b) continue;
+            if (Math.hypot(projectile.x - b.x, projectile.y - b.y) < R * 1.86) {
+              snapProjectile();
+              return;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  function drawBubble(x, y, color, radius = R) {
+    const g = ctx.createRadialGradient(x - radius * .35, y - radius * .42, radius * .08, x, y, radius);
+    g.addColorStop(0, "#ffffff");
+    g.addColorStop(.13, color.fill);
+    g.addColorStop(1, color.fill);
+    ctx.save();
+    ctx.shadowBlur = 14;
+    ctx.shadowColor = color.glow;
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalAlpha = .72;
+    ctx.fillStyle = "white";
+    ctx.beginPath();
+    ctx.arc(x - radius * .38, y - radius * .42, radius * .18, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalAlpha = .16;
+    ctx.strokeStyle = "white";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, radius - 1, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawAimLine() {
+    if (projectile || gameOver || !started) return;
+    ctx.save();
+    ctx.strokeStyle = "rgba(255,255,255,.42)";
+    ctx.lineWidth = 3;
+    ctx.setLineDash([9, 10]);
+    ctx.beginPath();
+    ctx.moveTo(shooter.x, shooter.y - R * 1.7);
+    ctx.lineTo(shooter.x + aim.x * H * .42, shooter.y - R * 1.7 + aim.y * H * .42);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function render() {
+    ctx.clearRect(0, 0, W, H);
+
+    // board boundary
+    ctx.save();
+    ctx.globalAlpha = .18;
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, topOffset - R * 1.55, W, 2);
+    ctx.fillRect(0, shooter.y + R * 1.8, W, 2);
+    ctx.restore();
+
+    for (const row of board) {
+      if (!row) continue;
+      for (const b of row) if (b) drawBubble(b.x, b.y, b.color);
+    }
+
+    drawAimLine();
+
+    if (projectile) drawBubble(projectile.x, projectile.y, projectile.color);
+
+    // shooter base
+    ctx.save();
+    ctx.translate(shooter.x, shooter.y);
+    const angle = Math.atan2(aim.y, aim.x);
+    ctx.rotate(angle + Math.PI / 2);
+    ctx.fillStyle = "rgba(255,255,255,.20)";
+    ctx.strokeStyle = "rgba(255,255,255,.48)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(-R * .45, -R * 2.25, R * .9, R * 2.5, R * .35);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    drawBubble(shooter.x, shooter.y - R * .35, current, R * 1.08);
+
+    // next bubbles preview
+    ctx.save();
+    ctx.globalAlpha = .95;
+    ctx.font = "700 13px -apple-system, BlinkMacSystemFont, sans-serif";
+    ctx.fillStyle = "rgba(255,255,255,.70)";
+    ctx.fillText("下一顆", 20, shooter.y + R * 3.3);
+    drawBubble(92, shooter.y + R * 3.1, next, R * .62);
+    ctx.restore();
+  }
+
+  function loop() {
+    update();
+    render();
+    requestAnimationFrame(loop);
+  }
+
+  function pointerPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    const t = e.touches ? e.touches[0] : e;
+    return { x: t.clientX - rect.left, y: t.clientY - rect.top };
+  }
+
+  function setAimFromPoint(p) {
+    let dx = p.x - shooter.x;
+    let dy = p.y - (shooter.y - R * 1.7);
+    if (dy > -20) dy = -20; // 禁止往下射
+    const len = Math.hypot(dx, dy) || 1;
+    aim = { x: dx / len, y: dy / len };
+  }
+
+  canvas.addEventListener("pointerdown", e => {
+    e.preventDefault();
+    pointerDown = true;
+    setAimFromPoint(pointerPos(e));
+  }, { passive: false });
+
+  canvas.addEventListener("pointermove", e => {
+    e.preventDefault();
+    if (pointerDown) setAimFromPoint(pointerPos(e));
+  }, { passive: false });
+
+  canvas.addEventListener("pointerup", e => {
+    e.preventDefault();
+    if (pointerDown) {
+      setAimFromPoint(pointerPos(e));
+      shoot();
+    }
+    pointerDown = false;
+  }, { passive: false });
+
+  startBtn.addEventListener("click", () => {
+    started = true;
+    overlay.style.display = "none";
+    overlay.querySelector("h1").textContent = "氣泡消除測試版";
+    startBtn.textContent = "開始測試";
+    resetGame();
+  });
+
+  if (!CanvasRenderingContext2D.prototype.roundRect) {
+    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
+      this.beginPath();
+      this.moveTo(x+r, y);
+      this.arcTo(x+w, y, x+w, y+h, r);
+      this.arcTo(x+w, y+h, x, y+h, r);
+      this.arcTo(x, y+h, x, y, r);
+      this.arcTo(x, y, x+w, y, r);
+      this.closePath();
+      return this;
+    }
+  }
+
+  window.addEventListener("resize", resize);
+  resize();
+  loop();
+})();
+</script>
+</body>
+</html>
