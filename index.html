@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Bubble Flow" />
-  <title>Bubble Flow 1.6.2</title>
+  <title>Bubble Flow 1.6.3</title>
   <style>
     :root {
       --app-height: 100vh;
@@ -253,6 +253,10 @@
   let lastT = performance.now();
   let bgTime = 0;
   let reduceGlow = false;
+
+  // 1.6.3：把遊戲盤面的幾何資料固定下來，避免手機瀏覽器視窗高度微變造成盤面抖動。
+  let boardGeometry = null;
+
   bestEl.textContent = best;
 
   function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -270,6 +274,27 @@
     document.documentElement.style.setProperty("--app-height", `${h}px`);
   }
 
+  function makeBoardGeometry() {
+    return {
+      R,
+      rowH,
+      cols,
+      topOffset,
+      shooterX: shooter.x,
+      shooterY: shooter.y,
+      width: W,
+      height: H
+    };
+  }
+
+  function lockBoardGeometry() {
+    boardGeometry = makeBoardGeometry();
+  }
+
+  function activeGeometry() {
+    return boardGeometry || makeBoardGeometry();
+  }
+
   function resize() {
     setAppHeight();
     const rect = canvas.getBoundingClientRect();
@@ -278,8 +303,8 @@
     const newW = Math.max(280, Math.floor(rect.width || window.innerWidth || 390));
     const newH = Math.max(480, Math.floor(rect.height || window.innerHeight || 700));
 
-    const widthChanged = Math.abs(newW - lastStableWidth) > 3;
-    const heightChanged = Math.abs(newH - lastStableHeight) > 80;
+    const widthChanged = Math.abs(newW - lastStableWidth) > 8;
+    const heightChangedBig = Math.abs(newH - lastStableHeight) > 120;
 
     W = newW;
     H = newH;
@@ -297,14 +322,23 @@
 
     reduceGlow = W * H > 520000;
 
-    if (!ambient.length || widthChanged || heightChanged) makeAmbient();
+    if (!ambient.length || widthChanged || heightChangedBig) makeAmbient();
 
-    // 1.6.1 修正：
-    // Safari 的網址列收合會觸發 visualViewport resize。舊版在 cols 略變時會 resetGame，
-    // 造成泡泡顏色、位置看起來整個被重抽。這版只在「真正寬度變動」時才重開版面。
+    // 1.6.3 穩定化：
+    // 遊戲開始後，不因為 iPhone Safari 工具列高度變動就重排盤面。
+    // 只有「寬度真的改變」才重建盤面；純高度變動只更新 canvas，不動 board。
     if (started) {
-      if (lastCols && lastCols !== cols && widthChanged) resetGame();
-      else reflowBoard();
+      if (widthChanged) {
+        boardGeometry = null;
+        if (lastCols && lastCols !== cols) resetGame();
+        else {
+          lockBoardGeometry();
+          reflowBoard();
+        }
+      } else if (!boardGeometry) {
+        lockBoardGeometry();
+        reflowBoard();
+      }
     }
 
     lastCols = cols;
@@ -333,23 +367,25 @@
   }
 
   function gridToPixel(row, col) {
-    const offset = (row % 2) * R;
-    const totalW = cols * R * 2 + R;
-    const left = (W - totalW) / 2 + R;
+    const g = activeGeometry();
+    const offset = (row % 2) * g.R;
+    const totalW = g.cols * g.R * 2 + g.R;
+    const left = (g.width - totalW) / 2 + g.R;
     return {
-      x: left + col * R * 2 + offset + R,
-      y: topOffset + row * rowH
+      x: left + col * g.R * 2 + offset + g.R,
+      y: g.topOffset + row * g.rowH
     };
   }
 
   function pixelToGrid(x, y) {
-    let row = Math.round((y - topOffset) / rowH);
+    const g = activeGeometry();
+    let row = Math.round((y - g.topOffset) / g.rowH);
     row = clamp(row, 0, 17);
-    const offset = (row % 2) * R;
-    const totalW = cols * R * 2 + R;
-    const left = (W - totalW) / 2 + R;
-    let col = Math.round((x - left - offset - R) / (R * 2));
-    col = clamp(col, 0, cols - 1);
+    const offset = (row % 2) * g.R;
+    const totalW = g.cols * g.R * 2 + g.R;
+    const left = (g.width - totalW) / 2 + g.R;
+    let col = Math.round((x - left - offset - g.R) / (g.R * 2));
+    col = clamp(col, 0, g.cols - 1);
     return { row, col };
   }
 
@@ -380,6 +416,8 @@
   }
 
   function resetGame() {
+    lockBoardGeometry();
+
     board = [];
     particles = [];
     floatTexts = [];
@@ -616,8 +654,8 @@
   function addPressureRow() {
     clearPreExistingFloating();
 
-    // 1.6.2 修正：
-    // 新增排時只做「垂直往下」動畫，不做左右偏移補間。
+    // 1.6.3 修正：
+    // 新增排時只做「更慢的垂直往下」動畫，不做左右偏移補間。
     // 先記錄每顆泡泡目前畫面上的 y，再更新 row，x 直接使用新列位置，y 從舊 y 平滑移到新 y。
     const oldBoard = board;
     const maxRows = Math.max(1, Math.floor((shooter.y - topOffset - R * 2) / rowH));
@@ -651,8 +689,8 @@
         // 只保留 y 軸補間。x 不補間，避免奇偶列錯位造成的左右漂移感。
         old.dropDx = 0;
         old.dropDy = oldY - p.y;
-        old.shiftT = .22;
-        old.settle = .10;
+        old.shiftT = .46;
+        old.settle = .04;
 
         nextBoard[newRow][c] = old;
       }
@@ -688,9 +726,9 @@
     if (projectile || gameOver || !started) return;
     projectile = {
       x: shooter.x,
-      y: shooter.y - R * 1.65,
-      vx: aim.x * Math.max(7.3, W / 78),
-      vy: aim.y * Math.max(7.3, W / 78),
+      y: shooter.y,
+      vx: aim.x * Math.max(9.2, W / 62),
+      vy: aim.y * Math.max(9.2, W / 62),
       color: current,
       squishX: 0.72,
       squishY: 1.28,
@@ -914,7 +952,7 @@
   function drawAimLine() {
     if (projectile || gameOver || !started) return;
     const sx = shooter.x;
-    const sy = shooter.y - R * 1.65;
+    const sy = shooter.y;
     const len = H * .38;
     ctx.save();
     ctx.strokeStyle = "rgba(255,255,255,.33)";
@@ -997,9 +1035,9 @@
     let drawY = b.y;
 
     if (b.shiftT > 0) {
-      const t = 1 - b.shiftT / .22;
+      const t = 1 - b.shiftT / .46;
       const e = easeInOutCubic(clamp(t, 0, 1));
-      drawX = b.x; // 1.6.2：新增排時不做左右補間，只垂直下移
+      drawX = b.x; // 1.6.3：新增排時不做左右補間，只垂直下移
       drawY = b.y + b.dropDy * (1 - e);
     }
 
@@ -1090,7 +1128,7 @@
 
   function setAimFromPoint(p) {
     let dx = p.x - shooter.x;
-    let dy = p.y - (shooter.y - R * 1.65);
+    let dy = p.y - shooter.y;
     if (dy > -20) dy = -20;
     const len = Math.hypot(dx, dy) || 1;
     aim = { x: dx / len, y: dy / len };
