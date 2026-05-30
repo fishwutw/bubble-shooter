@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Bubble Flow" />
-  <title>Bubble Flow 1.6</title>
+  <title>Bubble Flow 1.6.1</title>
   <style>
     :root {
       --app-height: 100vh;
@@ -239,6 +239,7 @@
   let ambient = [];
   let falling = [];
   let pulses = [];
+  let rowShiftAnimations = [];
   let shooter = { x: 195, y: 600, squish: 0, pulse: 0 };
   let current = null, next = null, projectile = null;
   let aim = { x: 0, y: -1 };
@@ -247,6 +248,8 @@
   let gameOver = false, started = false;
   let best = Number(localStorage.getItem("bubbleFlowBest") || "0");
   let lastCols = 0;
+  let lastStableWidth = 0;
+  let lastStableHeight = 0;
   let lastT = performance.now();
   let bgTime = 0;
   let reduceGlow = false;
@@ -260,6 +263,7 @@
     return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
   }
   function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+  function easeInOutCubic(t) { return t < .5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
 
   function setAppHeight() {
     const h = Math.round((window.visualViewport && window.visualViewport.height) || window.innerHeight || document.documentElement.clientHeight || 700);
@@ -271,8 +275,14 @@
     const rect = canvas.getBoundingClientRect();
     dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
 
-    W = Math.max(280, Math.floor(rect.width || window.innerWidth || 390));
-    H = Math.max(480, Math.floor(rect.height || window.innerHeight || 700));
+    const newW = Math.max(280, Math.floor(rect.width || window.innerWidth || 390));
+    const newH = Math.max(480, Math.floor(rect.height || window.innerHeight || 700));
+
+    const widthChanged = Math.abs(newW - lastStableWidth) > 3;
+    const heightChanged = Math.abs(newH - lastStableHeight) > 80;
+
+    W = newW;
+    H = newH;
 
     canvas.width = Math.floor(W * dpr);
     canvas.height = Math.floor(H * dpr);
@@ -287,13 +297,19 @@
 
     reduceGlow = W * H > 520000;
 
-    makeAmbient();
+    if (!ambient.length || widthChanged || heightChanged) makeAmbient();
 
+    // 1.6.1 修正：
+    // Safari 的網址列收合會觸發 visualViewport resize。舊版在 cols 略變時會 resetGame，
+    // 造成泡泡顏色、位置看起來整個被重抽。這版只在「真正寬度變動」時才重開版面。
     if (started) {
-      if (lastCols && lastCols !== cols) resetGame();
+      if (lastCols && lastCols !== cols && widthChanged) resetGame();
       else reflowBoard();
     }
+
     lastCols = cols;
+    lastStableWidth = W;
+    lastStableHeight = H;
   }
 
   function makeAmbient() {
@@ -345,7 +361,10 @@
       wobble: 0,
       pop: 0,
       settle: Math.random() * 0.18,
-      hitPulse: 0
+      hitPulse: 0,
+      dropDx: 0,
+      dropDy: 0,
+      shiftT: 0
     };
   }
 
@@ -366,6 +385,7 @@
     floatTexts = [];
     falling = [];
     pulses = [];
+    rowShiftAnimations = [];
     score = 0;
     combo = 0;
     shots = 0;
@@ -379,16 +399,20 @@
     scoreEl.textContent = score;
     comboEl.textContent = combo;
 
+    // 1.6.1 修正：
+    // 先避免初始盤面產生「已經懸空的島」，否則玩家只消左邊，右邊早就懸空的泡泡也會掉。
+    // 前四排保持完整連接，第五排才留少量空洞。
     for (let r = 0; r < 5; r++) {
       board[r] = [];
       for (let c = 0; c < cols; c++) {
-        board[r][c] = (r < 2 || Math.random() > 0.13) ? makeBubble(r, c) : null;
+        const keep = r < 4 || Math.random() > 0.18;
+        board[r][c] = keep ? makeBubble(r, c) : null;
       }
     }
   }
 
-  function getBubble(row, col) {
-    return board[row] && board[row][col] ? board[row][col] : null;
+  function getBubble(row, col, source = board) {
+    return source[row] && source[row][col] ? source[row][col] : null;
   }
 
   function setBubble(b) {
@@ -430,15 +454,22 @@
     return cluster;
   }
 
-  function findFloating() {
+  function findFloating(exemptKeys = new Set()) {
     const connected = new Set();
     const stack = [];
-    if (board[0]) for (let c = 0; c < cols; c++) if (board[0][c]) stack.push(board[0][c]);
+
+    // 只從天花板上實際存在的泡泡開始找。
+    if (board[0]) {
+      for (let c = 0; c < cols; c++) {
+        const b = board[0][c];
+        if (b) stack.push(b);
+      }
+    }
 
     while (stack.length) {
       const b = stack.pop();
       const key = `${b.row},${b.col}`;
-      if (connected.has(key)) continue;
+      if (connected.has(key) || exemptKeys.has(key)) continue;
       connected.add(key);
       for (const n of neighbors(b.row, b.col)) {
         const nb = getBubble(n.row, n.col);
@@ -449,22 +480,34 @@
     const out = [];
     for (const row of board) {
       if (!row) continue;
-      for (const b of row) if (b && !connected.has(`${b.row},${b.col}`)) out.push(b);
+      for (const b of row) {
+        if (!b) continue;
+        const key = `${b.row},${b.col}`;
+        if (!connected.has(key) && !exemptKeys.has(key)) out.push(b);
+      }
     }
     return out;
+  }
+
+  function clearPreExistingFloating() {
+    // 只在新增排之前做靜默清理，避免累積「早就懸空」的島造成誤掉。
+    const floatingNow = findFloating();
+    if (!floatingNow.length) return;
+    for (const b of floatingNow) removeBubble(b);
   }
 
   function addPopParticles(x, y, color, amount = 12) {
     for (let i = 0; i < amount; i++) {
       const a = Math.random() * Math.PI * 2;
       const s = 40 + Math.random() * 170;
+      const maxLife = .42 + Math.random() * .38;
       particles.push({
         x, y,
         vx: Math.cos(a) * s,
         vy: Math.sin(a) * s,
         r: 1.5 + Math.random() * 4.5,
-        life: .42 + Math.random() * .38,
-        maxLife: .42 + Math.random() * .38,
+        life: maxLife,
+        maxLife,
         color
       });
     }
@@ -520,15 +563,20 @@
       comboEl.textContent = combo;
 
       let cx = 0, cy = 0;
+      const removedKeys = new Set();
       for (const b of cluster) {
         cx += b.x; cy += b.y;
+        removedKeys.add(`${b.row},${b.col}`);
         addPopParticles(b.x, b.y, b.color, 10);
         removeBubble(b);
       }
       cx /= cluster.length;
       cy /= cluster.length;
 
-      const floating = findFloating();
+      // 1.6.1 修正：
+      // 掉落判定只在消除之後執行。由於初始盤面和新增排都避免預先懸空，
+      // 這裡掉落的就會是「這次消除造成失去連接」的泡泡，而不是畫面另一側早已懸空的島。
+      const floating = findFloating(removedKeys);
       for (const b of floating) {
         removeBubble(b);
         falling.push({
@@ -566,21 +614,52 @@
   }
 
   function addPressureRow() {
+    clearPreExistingFloating();
+
+    // 1.6.1 修正：
+    // 舊版一邊讀 board、一邊覆寫 board，視覺上容易出現跳動或位置瞬變。
+    // 這裡先建立全新的 nextBoard，保留每顆泡泡的 color，不重抽、不改色。
+    const oldBoard = board;
     const maxRows = Math.max(1, Math.floor((shooter.y - topOffset - R * 2) / rowH));
-    for (let r = Math.min(board.length, maxRows); r >= 1; r--) {
-      board[r] = [];
+    const nextBoard = [];
+
+    nextBoard[0] = [];
+    for (let c = 0; c < cols; c++) {
+      nextBoard[0][c] = Math.random() > 0.20 ? makeBubble(0, c) : null;
+    }
+
+    for (let r = 0; r < Math.min(oldBoard.length, maxRows); r++) {
+      if (!oldBoard[r]) continue;
+      const newRow = r + 1;
+      if (!nextBoard[newRow]) nextBoard[newRow] = [];
       for (let c = 0; c < cols; c++) {
-        const old = getBubble(r - 1, c);
-        if (old) {
-          const moved = { ...old, row: r, col: c, settle: .24 };
-          const p = gridToPixel(r, c);
-          moved.x = p.x; moved.y = p.y;
-          board[r][c] = moved;
-        } else board[r][c] = null;
+        const old = oldBoard[r][c];
+        if (!old) {
+          nextBoard[newRow][c] = null;
+          continue;
+        }
+        const oldX = old.x;
+        const oldY = old.y;
+        old.row = newRow;
+        old.col = c;
+        const p = gridToPixel(newRow, c);
+        old.x = p.x;
+        old.y = p.y;
+        old.dropDx = oldX - p.x;
+        old.dropDy = oldY - p.y;
+        old.shiftT = .24;
+        old.settle = .18;
+        nextBoard[newRow][c] = old;
       }
     }
-    board[0] = [];
-    for (let c = 0; c < cols; c++) board[0][c] = Math.random() > 0.20 ? makeBubble(0, c) : null;
+
+    board = nextBoard;
+
+    // 新增排後理論上不應該產生懸空島；保險起見，靜默清掉已懸空者，不做掉落動畫。
+    const stray = findFloating();
+    if (stray.length) {
+      for (const b of stray) removeBubble(b);
+    }
   }
 
   function checkGameOver() {
@@ -630,6 +709,7 @@
         if (!b) continue;
         b.settle = Math.max(0, b.settle - dt);
         b.hitPulse = Math.max(0, b.hitPulse - dt * 4.2);
+        b.shiftT = Math.max(0, b.shiftT - dt);
       }
     }
 
@@ -897,7 +977,6 @@
     const sy = 1 - pull - s * .18;
     if (current) drawBubble(shooter.x, shooter.y - R * .18, current, R * 1.05, { sx, sy });
 
-    // next preview
     ctx.save();
     ctx.globalAlpha = .82;
     ctx.fillStyle = "rgba(255,255,255,.52)";
@@ -906,6 +985,23 @@
     ctx.fillText("next", shooter.x + R * 3.15, shooter.y + R * 1.75);
     ctx.restore();
     if (next) drawBubble(shooter.x + R * 3.15, shooter.y + R * 1.02, next, R * .58, { alpha: .88 });
+  }
+
+  function drawBoardBubble(b) {
+    let drawX = b.x;
+    let drawY = b.y;
+
+    if (b.shiftT > 0) {
+      const t = 1 - b.shiftT / .24;
+      const e = easeInOutCubic(clamp(t, 0, 1));
+      drawX = b.x + b.dropDx * (1 - e);
+      drawY = b.y + b.dropDy * (1 - e);
+    }
+
+    const settle = b.settle > 0 ? easeOutBack(1 - b.settle / .32) : 1;
+    const scale = b.settle > 0 ? clamp(settle, .72, 1.18) : 1;
+    const pulse = b.hitPulse;
+    drawBubble(drawX, drawY, b.color, R * scale, { pulse });
   }
 
   function render() {
@@ -932,13 +1028,7 @@
 
     for (const row of board) {
       if (!row) continue;
-      for (const b of row) {
-        if (!b) continue;
-        const settle = b.settle > 0 ? easeOutBack(1 - b.settle / .32) : 1;
-        const scale = b.settle > 0 ? clamp(settle, .72, 1.18) : 1;
-        const pulse = b.hitPulse;
-        drawBubble(b.x, b.y, b.color, R * scale, { pulse });
-      }
+      for (const b of row) if (b) drawBoardBubble(b);
     }
 
     for (const f of falling) {
@@ -1045,9 +1135,20 @@
     resetGame();
   });
 
-  window.addEventListener("resize", resize);
-  window.addEventListener("orientationchange", () => setTimeout(resize, 350));
-  if (window.visualViewport) window.visualViewport.addEventListener("resize", resize);
+  // 1.6.1 修正：
+  // 不再直接把 visualViewport resize 綁到 resize，避免 iPhone Safari 網址列收合時造成盤面重算。
+  window.addEventListener("resize", () => {
+    setTimeout(resize, 120);
+  });
+  window.addEventListener("orientationchange", () => {
+    setTimeout(resize, 450);
+  });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener("resize", () => {
+      setAppHeight();
+      // 只修正容器高度，不重算盤面，避免畫面跳動。
+    });
+  }
 
   setAppHeight();
   resize();
