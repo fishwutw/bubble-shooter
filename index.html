@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Bubble Flow" />
-  <title>Bubble Flow 1.6.1</title>
+  <title>Bubble Flow 1.6.2</title>
   <style>
     :root {
       --app-height: 100vh;
@@ -616,9 +616,9 @@
   function addPressureRow() {
     clearPreExistingFloating();
 
-    // 1.6.1 修正：
-    // 舊版一邊讀 board、一邊覆寫 board，視覺上容易出現跳動或位置瞬變。
-    // 這裡先建立全新的 nextBoard，保留每顆泡泡的 color，不重抽、不改色。
+    // 1.6.2 修正：
+    // 新增排時只做「垂直往下」動畫，不做左右偏移補間。
+    // 先記錄每顆泡泡目前畫面上的 y，再更新 row，x 直接使用新列位置，y 從舊 y 平滑移到新 y。
     const oldBoard = board;
     const maxRows = Math.max(1, Math.floor((shooter.y - topOffset - R * 2) / rowH));
     const nextBoard = [];
@@ -632,30 +632,35 @@
       if (!oldBoard[r]) continue;
       const newRow = r + 1;
       if (!nextBoard[newRow]) nextBoard[newRow] = [];
+
       for (let c = 0; c < cols; c++) {
         const old = oldBoard[r][c];
         if (!old) {
           nextBoard[newRow][c] = null;
           continue;
         }
-        const oldX = old.x;
+
         const oldY = old.y;
         old.row = newRow;
         old.col = c;
+
         const p = gridToPixel(newRow, c);
         old.x = p.x;
         old.y = p.y;
-        old.dropDx = oldX - p.x;
+
+        // 只保留 y 軸補間。x 不補間，避免奇偶列錯位造成的左右漂移感。
+        old.dropDx = 0;
         old.dropDy = oldY - p.y;
-        old.shiftT = .24;
-        old.settle = .18;
+        old.shiftT = .22;
+        old.settle = .10;
+
         nextBoard[newRow][c] = old;
       }
     }
 
     board = nextBoard;
 
-    // 新增排後理論上不應該產生懸空島；保險起見，靜默清掉已懸空者，不做掉落動畫。
+    // 新增排若產生懸空泡泡，靜默清掉，不播放掉落動畫。
     const stray = findFloating();
     if (stray.length) {
       for (const b of stray) removeBubble(b);
@@ -992,14 +997,14 @@
     let drawY = b.y;
 
     if (b.shiftT > 0) {
-      const t = 1 - b.shiftT / .24;
+      const t = 1 - b.shiftT / .22;
       const e = easeInOutCubic(clamp(t, 0, 1));
-      drawX = b.x + b.dropDx * (1 - e);
+      drawX = b.x; // 1.6.2：新增排時不做左右補間，只垂直下移
       drawY = b.y + b.dropDy * (1 - e);
     }
 
     const settle = b.settle > 0 ? easeOutBack(1 - b.settle / .32) : 1;
-    const scale = b.settle > 0 ? clamp(settle, .72, 1.18) : 1;
+    const scale = b.settle > 0 ? clamp(settle, .88, 1.08) : 1;
     const pulse = b.hitPulse;
     drawBubble(drawX, drawY, b.color, R * scale, { pulse });
   }
