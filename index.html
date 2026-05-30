@@ -5,15 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="氣泡消除測試版" />
-  <title>氣泡消除測試版 Stage 1</title>
+  <title>氣泡消除測試版 Stage 1 iPhone Fix</title>
   <style>
     :root {
+      --app-height: 100vh;
       --bg1: #17202b;
       --bg2: #273849;
-      --panel: rgba(255,255,255,.10);
+      --panel: rgba(255,255,255,.12);
       --text: #f6fbff;
       --muted: rgba(246,251,255,.72);
     }
+    * { box-sizing: border-box; }
     html, body {
       margin: 0;
       width: 100%;
@@ -26,21 +28,19 @@
       touch-action: none;
       -webkit-user-select: none;
       user-select: none;
+      -webkit-tap-highlight-color: transparent;
     }
-
     #wrap {
       width: 100vw;
-      height: 100vh;
-      height: 100svh;
+      height: var(--app-height);
       display: grid;
       place-items: center;
+      overflow: hidden;
     }
-
     #gameShell {
       position: relative;
       width: min(100vw, 760px);
-      height: 100vh;
-      height: 100svh;
+      height: var(--app-height);
       max-height: 1040px;
       background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(0,0,0,.18));
       box-shadow: 0 0 40px rgba(0,0,0,.35);
@@ -63,16 +63,19 @@
       justify-content: space-between;
       gap: 8px;
       pointer-events: none;
-      font-weight: 700;
+      font-weight: 800;
       text-shadow: 0 2px 4px rgba(0,0,0,.4);
+      z-index: 5;
     }
     .pill {
       background: var(--panel);
       backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
       border: 1px solid rgba(255,255,255,.16);
       border-radius: 999px;
       padding: 8px 12px;
       font-size: 15px;
+      white-space: nowrap;
     }
     #help {
       position: absolute;
@@ -85,6 +88,7 @@
       pointer-events: none;
       line-height: 1.45;
       text-shadow: 0 2px 4px rgba(0,0,0,.5);
+      z-index: 5;
     }
     #overlay {
       position: absolute;
@@ -93,25 +97,19 @@
       place-items: center;
       background: rgba(0,0,0,.55);
       padding: 24px;
+      z-index: 10;
     }
     .card {
       width: min(92%, 430px);
-      background: rgba(20,32,44,.92);
+      background: rgba(20,32,44,.94);
       border: 1px solid rgba(255,255,255,.18);
       border-radius: 24px;
       padding: 24px;
       text-align: center;
       box-shadow: 0 20px 60px rgba(0,0,0,.45);
     }
-    .card h1 {
-      margin: 0 0 8px;
-      font-size: 28px;
-    }
-    .card p {
-      margin: 8px 0;
-      color: var(--muted);
-      line-height: 1.6;
-    }
+    .card h1 { margin: 0 0 8px; font-size: 28px; }
+    .card p { margin: 8px 0; color: var(--muted); line-height: 1.6; }
     button {
       margin-top: 16px;
       border: 0;
@@ -138,8 +136,8 @@
       <div id="overlay">
         <div class="card">
           <h1>氣泡消除測試版</h1>
-          <p>這是第一階段網頁原型：隨機排列、隨機發射、碰撞吸附、三連消除與計分。</p>
-          <p>iPad 請用 Safari 開啟，橫直向都可以測試。</p>
+          <p>iPhone 修正版：改用穩定視窗高度、重新整理 Canvas 尺寸，並簡化泡泡繪製。</p>
+          <p>按下開始後，應該會立刻看到上方泡泡與下方待發射泡泡。</p>
           <button id="startBtn">開始測試</button>
         </div>
       </div>
@@ -149,62 +147,66 @@
 <script>
 (() => {
   const canvas = document.getElementById("game");
-  const ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext("2d", { alpha: true });
   const scoreEl = document.getElementById("score");
   const shotsEl = document.getElementById("shots");
   const bestEl = document.getElementById("best");
   const overlay = document.getElementById("overlay");
   const startBtn = document.getElementById("startBtn");
 
-  const colors = [
-    { name: "red",    fill: "#ff392e", glow: "rgba(255,57,46,.45)" },
-    { name: "yellow", fill: "#f2ee14", glow: "rgba(242,238,20,.45)" },
-    { name: "teal",   fill: "#10dbc7", glow: "rgba(16,219,199,.45)" },
-    { name: "purple", fill: "#7b55ff", glow: "rgba(123,85,255,.45)" },
+  const palette = [
+    { name: "red",    fill: "#ff392e", shade: "#ba1713" },
+    { name: "yellow", fill: "#f2ee14", shade: "#b4ad00" },
+    { name: "teal",   fill: "#10dbc7", shade: "#008f86" },
+    { name: "purple", fill: "#7b55ff", shade: "#4b2fba" },
   ];
 
-  let W = 0, H = 0, dpr = 1;
-  let R = 23;
-  let rowH = 40;
-  let cols = 11;
-  let topOffset = 72;
+  let W = 390, H = 700, dpr = 1;
+  let R = 22, rowH = 38, cols = 9, topOffset = 92;
   let board = [];
-  let shooter = { x: 0, y: 0 };
-  let current = null;
-  let next = null;
-  let projectile = null;
+  let shooter = { x: 195, y: 600 };
+  let current = null, next = null, projectile = null;
   let aim = { x: 0, y: -1 };
   let pointerDown = false;
-  let score = 0;
-  let shots = 0;
-  let gameOver = false;
-  let started = false;
+  let score = 0, shots = 0;
+  let gameOver = false, started = false;
   let best = Number(localStorage.getItem("bubbleBest") || "0");
+  let lastCols = 0;
   bestEl.textContent = best;
 
+  function setAppHeight() {
+    const h = Math.round((window.visualViewport && window.visualViewport.height) || window.innerHeight || document.documentElement.clientHeight || 700);
+    document.documentElement.style.setProperty("--app-height", `${h}px`);
+  }
+
   function resize() {
+    setAppHeight();
     const rect = canvas.getBoundingClientRect();
     dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-    W = Math.floor(rect.width || window.innerWidth || 390);
-    H = Math.floor(rect.height || window.innerHeight || 700);
-    if (H < 300) H = Math.floor(window.innerHeight || 700);
-    if (W < 200) W = Math.floor(window.innerWidth || 390);
+
+    W = Math.max(280, Math.floor(rect.width || window.innerWidth || 390));
+    H = Math.max(480, Math.floor(rect.height || window.innerHeight || 700));
+
     canvas.width = Math.floor(W * dpr);
     canvas.height = Math.floor(H * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    R = Math.max(18, Math.min(28, W / 18));
+    R = Math.max(17, Math.min(25, W / 18));
     rowH = R * 1.72;
-    cols = Math.max(8, Math.floor((W - R * 2) / (R * 2)));
-    topOffset = Math.max(58, H * 0.075);
+    cols = Math.max(7, Math.floor((W - R * 2.5) / (R * 2)));
+    topOffset = Math.max(82, H * 0.10);
     shooter.x = W / 2;
-    shooter.y = H - Math.max(88, H * 0.11);
+    shooter.y = H - Math.max(112, H * 0.14);
 
-    if (started) resetGame();
+    if (started) {
+      if (lastCols && lastCols !== cols) resetGame();
+      else reflowBoard();
+    }
+    lastCols = cols;
   }
 
   function randColor() {
-    return colors[Math.floor(Math.random() * colors.length)];
+    return palette[Math.floor(Math.random() * palette.length)];
   }
 
   function gridToPixel(row, col) {
@@ -219,7 +221,7 @@
 
   function pixelToGrid(x, y) {
     let row = Math.round((y - topOffset) / rowH);
-    row = Math.max(0, Math.min(14, row));
+    row = Math.max(0, Math.min(16, row));
     const offset = (row % 2) * R;
     const totalW = cols * R * 2 + R;
     const left = (W - totalW) / 2 + R;
@@ -233,25 +235,33 @@
     return { row, col, x: p.x, y: p.y, color };
   }
 
+  function reflowBoard() {
+    for (const row of board) {
+      if (!row) continue;
+      for (const b of row) {
+        if (!b) continue;
+        const p = gridToPixel(b.row, b.col);
+        b.x = p.x; b.y = p.y;
+      }
+    }
+  }
+
   function resetGame() {
     board = [];
     score = 0;
     shots = 0;
     gameOver = false;
+    projectile = null;
     current = randColor();
     next = randColor();
-    projectile = null;
     aim = { x: 0, y: -1 };
     scoreEl.textContent = score;
     shotsEl.textContent = shots;
 
-    const initialRows = 5;
-    for (let r = 0; r < initialRows; r++) {
+    for (let r = 0; r < 5; r++) {
       board[r] = [];
       for (let c = 0; c < cols; c++) {
-        // 留一點空洞，讓版面比較自然
-        if (r < 2 || Math.random() > 0.12) board[r][c] = makeBubble(r, c);
-        else board[r][c] = null;
+        board[r][c] = (r < 2 || Math.random() > 0.12) ? makeBubble(r, c) : null;
       }
     }
   }
@@ -302,11 +312,8 @@
   function findFloating() {
     const connected = new Set();
     const stack = [];
-    if (board[0]) {
-      for (let c = 0; c < cols; c++) {
-        if (board[0][c]) stack.push(board[0][c]);
-      }
-    }
+    if (board[0]) for (let c = 0; c < cols; c++) if (board[0][c]) stack.push(board[0][c]);
+
     while (stack.length) {
       const b = stack.pop();
       const key = `${b.row},${b.col}`;
@@ -317,27 +324,25 @@
         if (nb) stack.push(nb);
       }
     }
+
     const floating = [];
     for (const row of board) {
       if (!row) continue;
-      for (const b of row) {
-        if (b && !connected.has(`${b.row},${b.col}`)) floating.push(b);
-      }
+      for (const b of row) if (b && !connected.has(`${b.row},${b.col}`)) floating.push(b);
     }
     return floating;
   }
 
   function snapProjectile() {
-    let target = pixelToGrid(projectile.x, projectile.y);
+    if (!projectile) return;
 
-    // 如果格子被佔用，找附近最近空格
+    let target = pixelToGrid(projectile.x, projectile.y);
     let candidates = [{...target}];
     for (const n of neighbors(target.row, target.col)) candidates.push(n);
     for (const n of neighbors(target.row - 1, target.col)) candidates.push(n);
     for (const n of neighbors(target.row + 1, target.col)) candidates.push(n);
 
-    let bestCell = null;
-    let bestDist = Infinity;
+    let bestCell = null, bestDist = Infinity;
     for (const cell of candidates) {
       if (cell.row < 0 || cell.col < 0 || cell.col >= cols) continue;
       if (getBubble(cell.row, cell.col)) continue;
@@ -348,8 +353,8 @@
         bestCell = cell;
       }
     }
-
     if (!bestCell) bestCell = target;
+
     const placed = makeBubble(bestCell.row, bestCell.col, projectile.color);
     setBubble(placed);
 
@@ -392,9 +397,7 @@
       }
     }
     board[0] = [];
-    for (let c = 0; c < cols; c++) {
-      board[0][c] = Math.random() > 0.18 ? makeBubble(0, c) : null;
-    }
+    for (let c = 0; c < cols; c++) board[0][c] = Math.random() > 0.18 ? makeBubble(0, c) : null;
   }
 
   function checkGameOver() {
@@ -427,61 +430,70 @@
   }
 
   function update() {
-    if (projectile) {
-      projectile.x += projectile.vx;
-      projectile.y += projectile.vy;
+    if (!projectile) return;
 
-      if (projectile.x - R < 0) {
-        projectile.x = R;
-        projectile.vx *= -1;
-      }
-      if (projectile.x + R > W) {
-        projectile.x = W - R;
-        projectile.vx *= -1;
-      }
-      if (projectile.y - R <= topOffset - R * .6) {
-        projectile.y = topOffset;
-        snapProjectile();
-      } else {
-        for (const row of board) {
-          if (!row) continue;
-          for (const b of row) {
-            if (!b) continue;
-            if (Math.hypot(projectile.x - b.x, projectile.y - b.y) < R * 1.86) {
-              snapProjectile();
-              return;
-            }
-          }
+    projectile.x += projectile.vx;
+    projectile.y += projectile.vy;
+
+    if (projectile.x - R < 0) {
+      projectile.x = R;
+      projectile.vx *= -1;
+    }
+    if (projectile.x + R > W) {
+      projectile.x = W - R;
+      projectile.vx *= -1;
+    }
+
+    if (projectile.y - R <= topOffset - R * .6) {
+      projectile.y = topOffset;
+      snapProjectile();
+      return;
+    }
+
+    for (const row of board) {
+      if (!row) continue;
+      for (const b of row) {
+        if (!b) continue;
+        if (Math.hypot(projectile.x - b.x, projectile.y - b.y) < R * 1.86) {
+          snapProjectile();
+          return;
         }
       }
     }
   }
 
   function drawBubble(x, y, color, radius = R) {
-    const g = ctx.createRadialGradient(x - radius * .35, y - radius * .42, radius * .08, x, y, radius);
-    g.addColorStop(0, "#ffffff");
-    g.addColorStop(.13, color.fill);
-    g.addColorStop(1, color.fill);
+    if (!color) return;
     ctx.save();
-    ctx.shadowBlur = 14;
-    ctx.shadowColor = color.glow;
-    ctx.fillStyle = g;
+
+    // iPhone Safari 修正：不用複雜 radialGradient，改成穩定的純色＋陰影＋反光。
+    ctx.shadowBlur = radius * 0.45;
+    ctx.shadowColor = color.fill;
+    ctx.fillStyle = color.fill;
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.globalAlpha = .72;
-    ctx.fillStyle = "white";
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 0.28;
+    ctx.fillStyle = color.shade;
     ctx.beginPath();
-    ctx.arc(x - radius * .38, y - radius * .42, radius * .18, 0, Math.PI * 2);
+    ctx.arc(x + radius * 0.16, y + radius * 0.18, radius * 0.86, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.globalAlpha = .16;
-    ctx.strokeStyle = "white";
+    ctx.globalAlpha = 0.76;
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath();
+    ctx.arc(x - radius * 0.38, y - radius * 0.40, radius * 0.18, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalAlpha = 0.22;
+    ctx.strokeStyle = "#ffffff";
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(x, y, radius - 1, 0, Math.PI * 2);
     ctx.stroke();
+
     ctx.restore();
   }
 
@@ -498,10 +510,19 @@
     ctx.restore();
   }
 
+  function roundRectPath(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
   function render() {
     ctx.clearRect(0, 0, W, H);
 
-    // board boundary
     ctx.save();
     ctx.globalAlpha = .18;
     ctx.fillStyle = "#ffffff";
@@ -515,10 +536,8 @@
     }
 
     drawAimLine();
-
     if (projectile) drawBubble(projectile.x, projectile.y, projectile.color);
 
-    // shooter base
     ctx.save();
     ctx.translate(shooter.x, shooter.y);
     const angle = Math.atan2(aim.y, aim.x);
@@ -526,21 +545,19 @@
     ctx.fillStyle = "rgba(255,255,255,.20)";
     ctx.strokeStyle = "rgba(255,255,255,.48)";
     ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.roundRect(-R * .45, -R * 2.25, R * .9, R * 2.5, R * .35);
+    roundRectPath(-R * .45, -R * 2.25, R * .9, R * 2.5, R * .35);
     ctx.fill();
     ctx.stroke();
     ctx.restore();
 
-    drawBubble(shooter.x, shooter.y - R * .35, current, R * 1.08);
+    if (current) drawBubble(shooter.x, shooter.y - R * .35, current, R * 1.08);
 
-    // next bubbles preview
     ctx.save();
     ctx.globalAlpha = .95;
     ctx.font = "700 13px -apple-system, BlinkMacSystemFont, sans-serif";
     ctx.fillStyle = "rgba(255,255,255,.70)";
     ctx.fillText("下一顆", 20, shooter.y + R * 3.3);
-    drawBubble(92, shooter.y + R * 3.1, next, R * .62);
+    if (next) drawBubble(92, shooter.y + R * 3.1, next, R * .62);
     ctx.restore();
   }
 
@@ -550,88 +567,70 @@
     requestAnimationFrame(loop);
   }
 
-  function pointerPos(e) {
+  function eventPos(e) {
     const rect = canvas.getBoundingClientRect();
-    const t = e.touches ? e.touches[0] : e;
+    const t = (e.changedTouches && e.changedTouches[0]) || (e.touches && e.touches[0]) || e;
     return { x: t.clientX - rect.left, y: t.clientY - rect.top };
   }
 
   function setAimFromPoint(p) {
     let dx = p.x - shooter.x;
     let dy = p.y - (shooter.y - R * 1.7);
-    if (dy > -20) dy = -20; // 禁止往下射
+    if (dy > -20) dy = -20;
     const len = Math.hypot(dx, dy) || 1;
     aim = { x: dx / len, y: dy / len };
   }
 
-  canvas.addEventListener("pointerdown", e => {
+  function handleDown(e) {
     e.preventDefault();
     pointerDown = true;
-    setAimFromPoint(pointerPos(e));
-  }, { passive: false });
-
-  canvas.addEventListener("pointermove", e => {
+    setAimFromPoint(eventPos(e));
+  }
+  function handleMove(e) {
     e.preventDefault();
-    if (pointerDown) setAimFromPoint(pointerPos(e));
-  }, { passive: false });
-
-  canvas.addEventListener("pointerup", e => {
+    if (pointerDown) setAimFromPoint(eventPos(e));
+  }
+  function handleUp(e) {
     e.preventDefault();
     if (pointerDown) {
-      setAimFromPoint(pointerPos(e));
+      setAimFromPoint(eventPos(e));
       shoot();
     }
     pointerDown = false;
-  }, { passive: false });
+  }
 
-  canvas.addEventListener("touchstart", e => {
-    e.preventDefault();
-    pointerDown = true;
-    setAimFromPoint(pointerPos(e));
-  }, { passive: false });
+  if (window.PointerEvent) {
+    canvas.addEventListener("pointerdown", handleDown, { passive: false });
+    canvas.addEventListener("pointermove", handleMove, { passive: false });
+    canvas.addEventListener("pointerup", handleUp, { passive: false });
+    canvas.addEventListener("pointercancel", handleUp, { passive: false });
+  } else {
+    canvas.addEventListener("touchstart", handleDown, { passive: false });
+    canvas.addEventListener("touchmove", handleMove, { passive: false });
+    canvas.addEventListener("touchend", handleUp, { passive: false });
+    canvas.addEventListener("mousedown", handleDown, { passive: false });
+    canvas.addEventListener("mousemove", handleMove, { passive: false });
+    canvas.addEventListener("mouseup", handleUp, { passive: false });
+  }
 
-  canvas.addEventListener("touchmove", e => {
-    e.preventDefault();
-    if (pointerDown) setAimFromPoint(pointerPos(e));
-  }, { passive: false });
-
-  canvas.addEventListener("touchend", e => {
-    e.preventDefault();
-    if (pointerDown) {
-      shoot();
-    }
-    pointerDown = false;
-  }, { passive: false });
-  
   startBtn.addEventListener("click", () => {
     started = true;
     overlay.style.display = "none";
     overlay.querySelector("h1").textContent = "氣泡消除測試版";
     startBtn.textContent = "開始測試";
+    resize();
     resetGame();
   });
 
-  if (!CanvasRenderingContext2D.prototype.roundRect) {
-    CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, r) {
-      this.beginPath();
-      this.moveTo(x+r, y);
-      this.arcTo(x+w, y, x+w, y+h, r);
-      this.arcTo(x+w, y+h, x, y+h, r);
-      this.arcTo(x, y+h, x, y, r);
-      this.arcTo(x, y, x+w, y, r);
-      this.closePath();
-      return this;
-    }
-  }
-
   window.addEventListener("resize", resize);
-  window.addEventListener("orientationchange", () => {
-    setTimeout(resize, 300);
-  });
+  window.addEventListener("orientationchange", () => setTimeout(resize, 350));
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", resize);
 
+  setAppHeight();
   resize();
-  setTimeout(resize, 100);
-  setTimeout(resize, 500);
+  setTimeout(resize, 80);
+  setTimeout(resize, 300);
+  setTimeout(resize, 800);
   loop();
 })();
 </script>

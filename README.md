@@ -1,30 +1,10 @@
-# 氣泡消除測試版 Stage 1
+# 氣泡消除測試版 Stage 1 - iPhone Safari 修正版
 
-這是第一階段的網頁版原型，可直接在 iPad Safari 測試。
+修正重點：
 
-## 使用方式
+1. 不再依賴 `100dvh`，改用 JavaScript 讀取 `visualViewport.height` 後寫入 `--app-height`。
+2. `resize()` 不再在每次 iPhone Safari 網址列變動時重置整個遊戲，只重新校正位置。
+3. 泡泡繪製改成穩定的純色、陰影、反光，不使用可能在部分 Safari 狀態下出問題的複雜 radialGradient。
+4. 事件處理改成 PointerEvent 優先，沒有 PointerEvent 才使用 touch/mouse，避免 iPhone 觸控被重複觸發。
 
-1. 解壓縮 zip
-2. 開啟 `index.html`
-3. 或把整個資料夾放到任一靜態網站空間，例如 GitHub Pages、Netlify、內部伺服器
-4. iPad Safari 開啟網址後即可測試
-
-## 已完成功能
-
-- 隨機產生上方氣泡排列
-- 下方隨機氣泡發射
-- 觸控拖曳瞄準、放開發射
-- 牆壁反彈
-- 碰撞後吸附到六角網格
-- 三顆以上同色相連消除
-- 浮空氣泡掉落計分
-- 分數、發射次數、最高分
-- 每 6 次發射新增一排壓力氣泡
-
-## 下一階段可加入
-
-- PWA manifest 與離線快取
-- 音效與消除動畫
-- 海洋教育主題圖示
-- 關卡設定
-- 結束畫面 QR code 或排行榜
+請把這個 `index.html` 覆蓋 GitHub Pages repository 裡原本的 `index.html`。
